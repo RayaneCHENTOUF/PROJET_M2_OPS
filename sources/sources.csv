@@ -1,11 +1,11 @@
 nom,type,region,acces,url_flux,conditions,frequence,notes
 Ouest-France,PQR,Bretagne / Pays de la Loire,RSS,https://www.ouest-france.fr/rss/une,Droits voisins applicables - usage non commercial toléré avec lien,Toutes les heures,Plus grand quotidien français en diffusion ; flux RSS bien maintenu
-La Voix du Nord,PQR,Hauts-de-France,RSS,https://www.lavoixdunord.fr/arc/outboundfeeds/rss/?outputType=xml,Droits voisins applicables - pas de reproduction commerciale,Toutes les heures,Flux complet avec chapô ; vérifier les balises <description>
+L'Est Républicain,PQR,Grand Est,RSS,https://www.estrepublicain.fr/rss,Droits voisins applicables - usage non commercial avec lien,Toutes les heures,Groupe EBRA ; titres et chapôs dans le flux ; remplace La Voix du Nord (HTTP 403)
 Sud Ouest,PQR,Nouvelle-Aquitaine,RSS,https://www.sudouest.fr/rss.xml,Droits voisins applicables - lien obligatoire,Toutes les heures,Flux actif ; titres et résumés disponibles
-Le Télégramme,PQR,Bretagne,RSS,https://www.letelegramme.fr/rss/une.xml,Droits voisins applicables - usage éditorial avec mention source,Toutes les heures,Certains articles en accès payant ; chapô disponible dans le flux
+Le Dauphiné Libéré,PQR,Auvergne-Rhône-Alpes,RSS,https://www.ledauphine.com/rss,Droits voisins applicables - usage non commercial avec lien,Toutes les heures,Groupe EBRA ; titres et chapôs dans le flux ; remplace Le Télégramme (HTTP 403)
 Le Monde,PQN,National,RSS,https://www.lemonde.fr/rss/une.xml,Droits voisins - accord Google/AFP ; pas de reproduction sans accord,Toutes les heures,Flux de référence ; titres complets et chapôs ; articles payants mais résumé libre
 Libération,PQN,National,RSS,https://www.liberation.fr/arc/outboundfeeds/rss/?outputType=xml,Droits voisins applicables - citation courte avec lien,Toutes les heures,Flux actif ; vérifier régularité de mise à jour
 Le Figaro,PQN,National,RSS,https://www.lefigaro.fr/rss/figaro_actualites.xml,Droits voisins - CGU restrictives ; usage éditorial non commercial,Toutes les heures,Flux stable ; articles souvent en accès payant mais titre + chapô accessibles
-Les Échos,PQN,National / Économie,RSS,https://www.lesechos.fr/rss/rss_une.xml,Droits voisins - usage non commercial avec mention source,Toutes les heures,Presse économique ; flux actif ; majorité des articles payants
+La Tribune,PQN,National / Économie,RSS,https://www.latribune.fr/rss/rubriques/actualite.html,Droits voisins - usage non commercial avec mention source,Toutes les heures,Presse économique ; titres et chapôs dans le flux ; remplace Les Échos (HTTP 403)
 France 24,PQN,National,RSS,https://www.france24.com/fr/france/rss,Groupe France Médias Monde (service public) - reprise avec lien et mention source,Plusieurs fois par jour,Rubrique France en français
 La Dépêche du Midi,PQR,Occitanie,RSS,https://www.ladepeche.fr/rss.xml,Droits voisins applicables - usage non commercial avec lien,Toutes les heures,Flux général du site
