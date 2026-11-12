@@ -114,3 +114,70 @@ def test_code_retour_de_la_commande(cfg, engine, monkeypatch):
     assert main(["controler"]) == 0
     propre(engine, "vide", titre="")
     assert main(["controler"]) == 1
+
+
+# --- alerte par mail ----------------------------------------------------------
+
+MAIL = controles.ConfigMail("smtp.test", 587, "alerte@test", "secret", ("a@test", "b@test"))
+
+
+class FauxSMTP:
+    envoyes = []
+
+    def __init__(self, hote, port, timeout):
+        self.hote, self.port = hote, port
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+    def starttls(self):
+        self.tls = True
+
+    def login(self, user, mdp):
+        assert self.tls and (user, mdp) == ("alerte@test", "secret")
+
+    def send_message(self, m):
+        FauxSMTP.envoyes.append(m)
+
+
+def test_mail_envoye_seulement_en_cas_d_echec(engine, monkeypatch):
+    FauxSMTP.envoyes = []
+    monkeypatch.setattr("smtplib.SMTP", FauxSMTP)
+    propre(engine, "ok")
+    controler(engine, maintenant=MAINTENANT, webhook="", mail=MAIL)
+    assert FauxSMTP.envoyes == []
+
+    propre(engine, "vide", titre="")
+    controler(engine, maintenant=datetime(2026, 11, 12, 10, 1, tzinfo=timezone.utc), webhook="", mail=MAIL)
+    [m] = FauxSMTP.envoyes
+    assert m["To"] == "a@test, b@test" and "titre_vide" in m["Subject"]
+    assert "titre_vide" in m.get_content()
+
+
+def test_mail_en_panne_ne_masque_pas_l_alerte(engine, monkeypatch):
+    def panne(*a, **k):
+        raise OSError("SMTP injoignable")
+
+    monkeypatch.setattr("smtplib.SMTP", panne)
+    propre(engine, "vide", titre="")
+    assert not controler(engine, maintenant=MAINTENANT, webhook="", mail=MAIL).ok  # le contrôle reste faux
+
+
+def test_config_mail_depuis_env(monkeypatch):
+    assert controles.ConfigMail.depuis_env() is None  # rien de configuré (fixture autouse)
+    monkeypatch.setenv("GAZETTE_SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("GAZETTE_SMTP_USER", "x@gmail.com")
+    monkeypatch.setenv("GAZETTE_SMTP_PASSWORD", "abcd")
+    monkeypatch.setenv("GAZETTE_ALERTE_DESTINATAIRES", " a@test , b@test ,")
+    c = controles.ConfigMail.depuis_env()
+    assert c.destinataires == ("a@test", "b@test") and c.port == 587
+
+
+def test_horodatage_lisible_heure_de_paris():
+    # hiver : UTC+1 ; été : UTC+2 (changement d'heure géré)
+    assert controles.horodatage_lisible(datetime(2026, 11, 12, 17, 3, tzinfo=timezone.utc)) \
+        == "2026-11-12 17:03 UTC (18:03 heure de Paris)"
+    assert controles.horodatage_lisible(datetime(2026, 7, 1, 17, 3, tzinfo=timezone.utc)).endswith("(19:03 heure de Paris)")

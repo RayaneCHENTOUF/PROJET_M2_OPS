@@ -47,6 +47,12 @@ services:
       DATABASE_URL: mysql+pymysql://gazette:gazette@mysql:3306/gazette_db
       GAZETTE_DATA_DIR: /opt/gazette/data
       GAZETTE_ALERTE_WEBHOOK: ${GAZETTE_ALERTE_WEBHOOK:-}   # optionnel : webhook Slack/Discord/Teams des alertes qualite
+      # Alertes qualite par mail : valeurs lues dans .env (jamais commite)
+      GAZETTE_SMTP_HOST: ${GAZETTE_SMTP_HOST:-}
+      GAZETTE_SMTP_PORT: ${GAZETTE_SMTP_PORT:-587}
+      GAZETTE_SMTP_USER: ${GAZETTE_SMTP_USER:-}
+      GAZETTE_SMTP_PASSWORD: ${GAZETTE_SMTP_PASSWORD:-}
+      GAZETTE_ALERTE_DESTINATAIRES: ${GAZETTE_ALERTE_DESTINATAIRES:-}
     depends_on:
       mysql:
         condition: service_healthy
@@ -61,7 +67,7 @@ services:
       - ./sources:/opt/gazette/sources
       - ./data:/opt/gazette/data
     ports:
-      - "8080:8080"
+      - "${AIRFLOW_PORT:-8080}:8080"   # autre Airflow deja sur 8080 ? AIRFLOW_PORT=8081 dans .env
     command: standalone
     restart: unless-stopped
 

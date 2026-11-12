@@ -68,6 +68,18 @@ class FauxServeur:
         self.httpd.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def pas_d_alerte_reelle(monkeypatch):
+    """Les tests n'envoient jamais de vrai mail ni de vrai webhook, même si .env est rempli.
+
+    Variables posées à vide : python-dotenv n'écrase pas une variable déjà définie,
+    donc les identifiants de .env ne sont pas chargés pendant les tests.
+    """
+    for nom in ("GAZETTE_SMTP_HOST", "GAZETTE_SMTP_USER", "GAZETTE_SMTP_PASSWORD",
+                "GAZETTE_ALERTE_DESTINATAIRES", "GAZETTE_ALERTE_WEBHOOK"):
+        monkeypatch.setenv(nom, "")
+
+
 @pytest.fixture
 def serveur():
     s = FauxServeur()

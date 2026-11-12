@@ -157,15 +157,44 @@ WHERE nom = 'taux_rejet' AND source = 'Le Dauphiné Libéré' ORDER BY mesure_le
 Quand un fait est faux :
 1. une ligne `ERROR … ALERTE controle=… valeur=… seuil=… : détail` apparaît dans le journal, avec les sources ou articles en cause ;
 2. la commande sort avec le **code 1**, et la tâche Airflow `controler` **passe en rouge**. C'est le même mécanisme que `verifier_sommeil` pour les sources en sommeil ;
-3. *optionnel* : si `GAZETTE_ALERTE_WEBHOOK` est défini (dans `.env` ou dans l'environnement de `docker compose`), le message est aussi posté sur ce webhook. Le format est compatible Slack, Teams et Discord. Si l'envoi échoue, l'erreur est journalisée, et la tâche reste rouge de toute façon.
+3. **un mail est envoyé à l'équipe**. L'expéditeur est la boîte dédiée `alerte.airflow@gmail.com` (SMTP Gmail en STARTTLS, avec un mot de passe d'application). Les destinataires sont listés dans `GAZETTE_ALERTE_DESTINATAIRES`. Le sujet nomme les contrôles en échec (`[La Gazette] ALERTE qualité : taux_rejet`), et le corps donne la valeur, le seuil et les sources en cause ;
+4. *optionnel* : si `GAZETTE_ALERTE_WEBHOOK` est défini, le même message est posté sur ce webhook (format compatible Slack, Teams et Discord).
 
-**L'alerte a sonné** le 12/11/2026. Avec le seuil abaissé à 25 % (`GAZETTE_SEUIL_REJET=0.25`), la tâche Airflow `controler` est passée en FAILED :
+Si l'envoi du mail ou du webhook échoue, l'erreur est journalisée, et la tâche reste rouge de toute façon : on ne masque rien.
+
+**Configuration** : tout est dans `.env`, qui n'est **jamais commité**. `docker compose` transmet ces variables au conteneur Airflow.
 
 ```
-ERROR qualite.controles ALERTE controle=taux_rejet valeur=0.3 seuil=0.25 :
-      sources au-dessus de 25% sur 24 h : Le Dauphiné Libéré 30% (6/20)
-Marking task as FAILED. dag_id=collecte, task_id=controler
+GAZETTE_SMTP_HOST=smtp.gmail.com
+GAZETTE_SMTP_PORT=587
+GAZETTE_SMTP_USER=alerte.airflow@gmail.com
+GAZETTE_SMTP_PASSWORD=<mot de passe d'application Gmail>
+GAZETTE_ALERTE_DESTINATAIRES=membre1@…,membre2@…
 ```
+
+Si ces variables sont absentes, aucun mail n'est envoyé : l'alerte reste dans le journal et dans Airflow. Les tests n'envoient jamais de vrai mail (fixture `pas_d_alerte_reelle` dans `tests/conftest.py`, et faux serveur SMTP dans `tests/test_controles.py`).
+
+**L'alerte a sonné pour de vrai** le 12/11/2026, deux fois :
+
+- **dans Airflow** : avec le seuil abaissé à 25 % (`GAZETTE_SEUIL_REJET=0.25`), la tâche `controler` est passée en FAILED :
+
+  ```
+  ERROR qualite.controles ALERTE controle=taux_rejet valeur=0.3 seuil=0.25 :
+        sources au-dessus de 25% sur 24 h : Le Dauphiné Libéré 30% (6/20)
+  Marking task as FAILED. dag_id=collecte, task_id=controler
+  ```
+
+- **par mail, depuis Airflow**, le 12/11/2026 à 18h03 (heure de Paris), avec la commande `docker compose exec -e GAZETTE_SEUIL_REJET=0.25 airflow airflow tasks test collecte controler 2026-11-12`. Le mail est parti aux quatre adresses de l'équipe, et la tâche est passée en FAILED :
+
+  ```
+  ERROR qualite.controles ALERTE controle=taux_rejet valeur=0.4 seuil=0.25 :
+        sources au-dessus de 25% sur 24 h : Le Dauphiné Libéré 40% (16/40)
+  INFO  qualite.controles alerte envoyée par mail à alerte.airflow@gmail.com, flavio.texier@efrei.net,
+        rayan.chentouf@efrei.net, slimane.ainouz@efrei.net
+  Marking task as FAILED. dag_id=collecte, task_id=controler
+  ```
+
+  Capture du mail reçu : *à ajouter (`docs/img/alerte-mail.png`)*.
 
 Pour la refaire : `docker compose exec -e GAZETTE_SEUIL_REJET=0.25 airflow airflow tasks test collecte controler 2026-11-12`.
 

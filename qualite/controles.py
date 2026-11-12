@@ -24,6 +24,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -158,15 +159,82 @@ def publier(engine: Engine, bilan: Bilan) -> None:
         log.info('metrique nom=%s source="%s" valeur=%g', l["n"], l["s"], l["v"])
 
 
-def alerter(bilan: Bilan, webhook: Optional[str] = None) -> None:
-    """Une ligne ALERTE par fait faux ; et, si un webhook est configuré, un message (Slack/Discord/Teams)."""
+@dataclass(frozen=True)
+class ConfigMail:
+    """Envoi des alertes par mail (SMTP avec STARTTLS, ex. Gmail + mot de passe d'application)."""
+
+    hote: str
+    port: int
+    utilisateur: str
+    mot_de_passe: str
+    destinataires: tuple[str, ...]
+
+    @classmethod
+    def depuis_env(cls) -> Optional["ConfigMail"]:
+        """None si le mail n'est pas configuré (variables absentes) : l'alerte reste dans le journal et Airflow."""
+        hote, utilisateur = os.getenv("GAZETTE_SMTP_HOST"), os.getenv("GAZETTE_SMTP_USER")
+        mot_de_passe = os.getenv("GAZETTE_SMTP_PASSWORD")
+        destinataires = tuple(a.strip() for a in os.getenv("GAZETTE_ALERTE_DESTINATAIRES", "").split(",") if a.strip())
+        if not (hote and utilisateur and mot_de_passe and destinataires):
+            return None
+        return cls(hote, int(os.getenv("GAZETTE_SMTP_PORT", "587")), utilisateur, mot_de_passe, destinataires)
+
+
+# Les données restent en UTC partout ; l'heure de Paris n'est ajoutée que pour les humains
+# qui lisent l'alerte (UTC+1 en hiver, UTC+2 en été : ZoneInfo gère le changement d'heure).
+FUSEAU_LECTURE = ZoneInfo("Europe/Paris")
+
+
+def horodatage_lisible(d: datetime) -> str:
+    """« 2026-11-12 17:03 UTC (18:03 heure de Paris) »."""
+    return f"{d:%Y-%m-%d %H:%M} UTC ({d.astimezone(FUSEAU_LECTURE):%H:%M} heure de Paris)"
+
+
+def message_alerte(bilan: Bilan) -> str:
+    lignes = [f"Contrôle(s) de qualité en échec le {horodatage_lisible(bilan.mesure_le)} :", ""]
+    lignes += [f"- {r.controle} (valeur {r.valeur:g}, seuil {r.seuil:g}) : {r.detail}" for r in bilan.echecs]
+    lignes += ["", "Détail : rapports/qualite-AAAA-MM-JJ.md et journal de la tâche Airflow « controler »."]
+    return "\n".join(lignes)
+
+
+def envoyer_mail(bilan: Bilan, cfg: ConfigMail) -> None:
+    import smtplib
+    from email.message import EmailMessage
+
+    m = EmailMessage()
+    m["Subject"] = f"[La Gazette] ALERTE qualité : {', '.join(r.controle for r in bilan.echecs)}"
+    m["From"] = cfg.utilisateur
+    m["To"] = ", ".join(cfg.destinataires)
+    m.set_content(message_alerte(bilan))
+    with smtplib.SMTP(cfg.hote, cfg.port, timeout=15) as smtp:
+        smtp.starttls()
+        smtp.login(cfg.utilisateur, cfg.mot_de_passe)
+        smtp.send_message(m)
+
+
+def alerter(bilan: Bilan, webhook: Optional[str] = None, mail: Optional[ConfigMail] = None) -> None:
+    """Une ligne ALERTE par fait faux ; puis, si configurés, un mail à l'équipe et un message webhook.
+
+    `mail` / `webhook` à None : lus dans l'environnement (.env ou docker compose).
+    Un envoi qui échoue est journalisé mais ne masque rien : la tâche Airflow reste rouge.
+    """
     for r in bilan.echecs:
         log.error("ALERTE controle=%s valeur=%g seuil=%g : %s", r.controle, r.valeur, r.seuil, r.detail)
-    webhook = webhook if webhook is not None else os.getenv("GAZETTE_ALERTE_WEBHOOK")
-    if not webhook or bilan.ok:
+    if bilan.ok:
         return
-    message = "La Gazette : contrôle(s) de qualité en échec\n" + "\n".join(
-        f"- {r.controle} : {r.detail}" for r in bilan.echecs)
+
+    mail = mail if mail is not None else ConfigMail.depuis_env()
+    if mail:
+        try:
+            envoyer_mail(bilan, mail)
+            log.info("alerte envoyée par mail à %s", ", ".join(mail.destinataires))
+        except Exception as e:
+            log.error("envoi de l'alerte par mail impossible : %s", e)
+
+    webhook = webhook if webhook is not None else os.getenv("GAZETTE_ALERTE_WEBHOOK")
+    if not webhook:
+        return
+    message = "La Gazette : " + message_alerte(bilan)
     try:
         import requests
 
@@ -178,7 +246,7 @@ def alerter(bilan: Bilan, webhook: Optional[str] = None) -> None:
 
 
 def controler(engine: Engine, maintenant: Optional[datetime] = None, seuil_rejet: float = SEUIL_TAUX_REJET,
-              webhook: Optional[str] = None) -> Bilan:
+              webhook: Optional[str] = None, mail: Optional[ConfigMail] = None) -> Bilan:
     bilan = Bilan(mesure_le=(maintenant or datetime.now(timezone.utc)).replace(microsecond=0))
     bilan.resultats = [
         controle_date_future(engine, bilan),
@@ -188,5 +256,5 @@ def controler(engine: Engine, maintenant: Optional[datetime] = None, seuil_rejet
     for r in bilan.resultats:
         log.info("controle=%s ok=%s valeur=%g seuil=%g : %s", r.controle, r.ok, r.valeur, r.seuil, r.detail)
     publier(engine, bilan)
-    alerter(bilan, webhook)
+    alerter(bilan, webhook, mail)
     return bilan
