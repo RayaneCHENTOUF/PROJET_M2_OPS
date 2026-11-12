@@ -1,0 +1,13 @@
+# Collecte
+feedparser==6.0.11
+requests==2.32.3
+
+# Base de donnees (MySQL en Docker, SQLite pour les tests)
+SQLAlchemy==2.0.36
+PyMySQL==1.1.1
+
+# Utilitaires
+python-dotenv==1.0.1
+
+# Tests
+pytest==8.3.3

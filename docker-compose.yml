@@ -1,0 +1,85 @@
+services:
+
+  # Base de la Gazette : table sources (puis articles, sujets... aux etapes suivantes)
+  mysql:
+    image: mysql:8.0
+    container_name: gazette-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: gazette_db
+      MYSQL_USER: gazette
+      MYSQL_PASSWORD: gazette
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      retries: 20
+
+  # Base interne d'Airflow (historique des runs), separee des donnees du projet
+  airflow-db:
+    image: postgres:16
+    container_name: gazette-airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 20
+
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    container_name: gazette-airflow
+    user: "${AIRFLOW_UID:-50000}:0"   # sous Linux : AIRFLOW_UID=$(id -u) pour pouvoir ecrire dans ./data
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      DATABASE_URL: mysql+pymysql://gazette:gazette@mysql:3306/gazette_db
+      GAZETTE_DATA_DIR: /opt/gazette/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      airflow-db:
+        condition: service_healthy
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./collect:/opt/gazette/collect
+      - ./sql:/opt/gazette/sql
+      - ./sources:/opt/gazette/sources
+      - ./data:/opt/gazette/data
+    ports:
+      - "8080:8080"
+    command: standalone
+    restart: unless-stopped
+
+  # Conteneur pour lancer le collecteur a la main : docker compose run --rm pipeline python -m collect tout
+  pipeline:
+    build: .
+    container_name: gazette-pipeline
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+pymysql://gazette:gazette@mysql:3306/gazette_db
+      GAZETTE_DATA_DIR: /app/data
+    volumes:
+      - ./collect:/app/collect
+      - ./sql:/app/sql
+      - ./sources:/app/sources
+      - ./data:/app/data
+    command: python -m collect etat
+    profiles: ["manuel"]
+
+volumes:
+  mysql_data:
+  airflow_db:
