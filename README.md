@@ -15,8 +15,12 @@ collect/
   db.py          migrations versionnées + état des sources
   collecteur.py  un passage : toutes les sources, une ligne de journal par source
   __main__.py    ligne de commande
-dags/collecte.py           orchestration Airflow (*/30 min)
+qualite/                   traitement (TD 4) : normalisation, regles R01..R11 -> articles_propres | rejets
+dags/collecte.py           orchestration Airflow (*/30 min) : collecter puis traiter
+dags/retention.py          rétention quotidienne (3 h UTC) : bruts archivés à 30 j, rejets 30 j, propres 1 an
 sql/migrations/V001__...   migration de la table sources
+sql/migrations/V002__...   tables articles_propres et rejets
+sql/migrations/V003__...   table metriques_qualite (contrôles)
 tests/                     « source en panne » et « deux passages, zéro doublon »
 ```
 
@@ -27,10 +31,14 @@ python -m venv .venv && .venv/Scripts/activate      # Linux/Mac : source .venv/b
 pip install -r requirements.txt
 python -m collect tout        # migrer + sync-sources + collecter (SQLite dans data/gazette.db)
 python -m collect etat        # état des sources
+python -m qualite traiter     # brut -> articles_propres | rejets (idempotent)
+python -m qualite controler   # contrôles de qualité : métriques, code retour 1 si un fait est faux
+python -m qualite rapport     # rapport du jour -> rapports/qualite-AAAA-MM-JJ.md
+python -m qualite retention --simulation   # ce que la rétention archiverait / supprimerait
 python -m pytest              # tests
 ```
 
-Pour viser MySQL : `DATABASE_URL=mysql+pymysql://gazette:gazette@localhost:3306/gazette_db`.
+Pour viser le MySQL du docker-compose depuis la machine : `DATABASE_URL=mysql+pymysql://gazette:gazette@localhost:3307/gazette_db` (port modifiable avec `MYSQL_PORT`).
 
 ### Lancer avec Docker : la collecte tourne seule
 
@@ -38,7 +46,14 @@ Pour viser MySQL : `DATABASE_URL=mysql+pymysql://gazette:gazette@localhost:3306/
 docker compose up -d --build
 ```
 
-Airflow est sur http://localhost:8080. L'utilisateur est `admin` ; le mot de passe s'affiche avec `docker compose logs airflow | grep password`. Le DAG `collecte` démarre seul, sans qu'il faille le dé-pauser, et tourne toutes les 30 minutes tant que le conteneur est allumé.
+Airflow est sur http://localhost:8080. L'utilisateur est `admin` ; le mot de passe s'affiche avec `docker compose logs airflow | grep password`. Le DAG `collecte` démarre seul, sans qu'il faille le dé-pauser, et tourne toutes les 30 minutes tant que le conteneur est allumé :
+
+```
+migrer -> sync_sources -> collecter -+-> verifier_sommeil
+                                     +-> traiter -> controler -> rapport
+```
+
+`traiter` part de `collecter`, pas de `verifier_sommeil` : une source en sommeil n'empêche pas de traiter ce que les autres ont ramené.
 
 Commandes utiles :
 

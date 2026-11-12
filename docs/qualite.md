@@ -109,8 +109,109 @@ Les règles s'appliquent dans l'ordre du tableau. **La première qui rejette l'e
 
 ## 6. Contrôles de qualité
 
-*À compléter (étape 6).*
+Un contrôle vérifie **un fait sur les vraies données**, après chaque passage. Ce n'est pas un test : la CI (`tests/test_regles.py`) vérifie le **code** des règles sur une fixture, alors qu'un contrôle vérifie que la table `articles_propres`, telle qu'elle est en base, tient ses promesses.
 
-## 7. Journal des ajustements
+Code : `qualite/controles.py`. Commande : `python -m qualite controler`. Dans Airflow, c'est la tâche `controler`, qui suit `traiter` :
+
+```
+migrer -> sync_sources -> collecter -+-> verifier_sommeil
+                                     +-> traiter -> controler
+```
+
+### Les trois faits
+
+| Contrôle | Fait vérifié | Requête | Seuil |
+|---|---|---|---|
+| `date_future` | Aucun article propre publié dans le futur | `publie_le > maintenant + 1 h` sur `articles_propres` | 0 |
+| `titre_vide` | Aucun article propre sans titre | `TRIM(titre) = ''` sur `articles_propres` | 0 |
+| `taux_rejet` | Le taux de rejet d'une source ne dépasse pas 80 % | `rejets / (propres + rejets)` par source, sur les articles traités dans les **24 dernières heures** | 80 % |
+
+Les deux premiers faits sont censés être garantis par `R01_titre_vide` et `R02_date_future`. Le contrôle sert à **le prouver** sur les données : si quelqu'un affaiblit une règle, ou écrit dans la table par un autre chemin, il le voit. Le troisième fait détecte une règle trop gourmande, ou un flux qui a changé de format (par exemple tous les titres devenus vides).
+
+Deux choix pour `taux_rejet` :
+- **une fenêtre de 24 h** plutôt que le seul dernier passage : un passage de 30 min ne ramène que quelques articles par source, et 2 rejets sur 2 feraient 100 % ;
+- **un minimum de 5 articles** sur la fenêtre pour juger une source. En dessous, le taux est mesuré et publié, mais il ne déclenche pas d'alerte.
+
+Les seuils sont dans la section CONFIGURATION de `qualite/controles.py`. Le seuil de rejet peut aussi être changé sans toucher au code, avec `--seuil-rejet 0.5` ou la variable `GAZETTE_SEUIL_REJET`.
+
+### Les métriques
+
+À chaque contrôle, les chiffres sont écrits dans la table **`metriques_qualite`** (migration V003), une ligne par mesure `(mesure_le, nom, source, valeur)`. La source vaut `*` pour une valeur globale. Les mêmes lignes apparaissent dans le journal de la tâche (`metrique nom=… source="…" valeur=…`).
+
+| Métrique | Par source | Sens |
+|---|---|---|
+| `articles_entres`, `articles_gardes`, `articles_rejetes` | oui, plus `*` | Volumes traités sur 24 h |
+| `taux_rejet` | oui, plus `*` | Part rejetée sur 24 h |
+| `dates_futures`, `titres_vides` | `*` | Nombre de cas trouvés (doit valoir 0) |
+| `controle_date_future`, `controle_titre_vide`, `controle_taux_rejet` | `*` | 1 = fait vrai, 0 = fait faux |
+
+Exemple pour suivre le taux de rejet d'une source dans le temps :
+
+```sql
+SELECT mesure_le, valeur FROM metriques_qualite
+WHERE nom = 'taux_rejet' AND source = 'Le Dauphiné Libéré' ORDER BY mesure_le;
+```
+
+### L'alerte
+
+Quand un fait est faux :
+1. une ligne `ERROR … ALERTE controle=… valeur=… seuil=… : détail` apparaît dans le journal, avec les sources ou articles en cause ;
+2. la commande sort avec le **code 1**, et la tâche Airflow `controler` **passe en rouge**. C'est le même mécanisme que `verifier_sommeil` pour les sources en sommeil ;
+3. *optionnel* : si `GAZETTE_ALERTE_WEBHOOK` est défini (dans `.env` ou dans l'environnement de `docker compose`), le message est aussi posté sur ce webhook. Le format est compatible Slack, Teams et Discord. Si l'envoi échoue, l'erreur est journalisée, et la tâche reste rouge de toute façon.
+
+**L'alerte a sonné** le 12/11/2026. Avec le seuil abaissé à 25 % (`GAZETTE_SEUIL_REJET=0.25`), la tâche Airflow `controler` est passée en FAILED :
+
+```
+ERROR qualite.controles ALERTE controle=taux_rejet valeur=0.3 seuil=0.25 :
+      sources au-dessus de 25% sur 24 h : Le Dauphiné Libéré 30% (6/20)
+Marking task as FAILED. dag_id=collecte, task_id=controler
+```
+
+Pour la refaire : `docker compose exec -e GAZETTE_SEUIL_REJET=0.25 airflow airflow tasks test collecte controler 2026-11-12`.
+
+Avec le seuil réel de 80 %, le même jour, les trois contrôles sont verts. Le pire taux est celui du Dauphiné Libéré, à 30 %, à cause des reprises EBRA (`R10_reprise`).
+
+### Outil dédié ou assertions maison : assertions maison
+
+Nous avons écarté Great Expectations et Soda pour quatre raisons :
+- **trois faits, trois requêtes SQL**. Un outil dédié apporterait surtout de la configuration (contextes, suites, checkpoints) pour un gain nul à cette échelle ;
+- **pas de nouvelle dépendance dans l'image Airflow**. Great Expectations tire de nombreuses dépendances qui entrent en conflit avec celles d'Airflow (SQLAlchemy notamment, déjà en 1.4 dans l'image) ;
+- **le même code tourne partout** : SQLite en local et dans les tests, MySQL dans Docker ;
+- **des contrôles testés comme le reste** : `tests/test_controles.py` vérifie que chaque fait sonne quand il est faux et se tait sinon.
+
+Nous reviendrons sur ce choix si les contrôles se multiplient (plus d'une dizaine de faits, plusieurs tables), ou si l'on a besoin des rapports HTML de Great Expectations.
+
+## 7. Rapport de qualité du jour
+
+Code : `qualite/rapport.py`. Commande : `python -m qualite rapport`. Dans Airflow, c'est la tâche `rapport`, qui suit `controler` :
+
+```
+migrer -> sync_sources -> collecter -+-> verifier_sommeil
+                                     +-> traiter -> controler -> rapport
+```
+
+**Un fichier par jour** : `rapports/qualite-AAAA-MM-JJ.md`, avec une journée comptée en UTC. Il est **réécrit à chaque passage**, soit toutes les 30 min. On lit donc un seul fichier le matin, et les jours précédents restent archivés à côté. Un fichier par passage en aurait produit environ 48 par jour, ce qui est trop pour être lu. L'écriture est atomique (fichier temporaire, puis renommage) : on ne tombe jamais sur un rapport à moitié écrit.
+
+La tâche `rapport` tourne **même si `controler` est rouge** (`trigger_rule=all_done`). C'est justement quand un contrôle sonne qu'on a besoin du rapport pour comprendre pourquoi.
+
+Tout est relu dans la base (`articles_propres`, `rejets`, `metriques_qualite`). On peut donc régénérer n'importe quel jour : `python -m qualite rapport --date 2026-11-12`.
+
+### Contenu
+
+| Section | Ce qu'elle montre |
+|---|---|
+| En bref | **Entrés, gardés, rejetés** : cumul de la journée, et dernier passage seul |
+| Contrôles de qualité | Résultat du dernier contrôle du jour (vrai / FAUX) |
+| À surveiller | Contrôles en échec, sources qui perdent plus de 50 % de leurs articles (avec au moins 5 articles) et la règle responsable, règles qui n'ont rien rejeté |
+| Top 5 des rejets | Les 5 couples (règle × source) qui rejettent le plus, avec la part des articles de la source et un exemple de titre |
+| Rejets par règle | Toutes les règles, même à 0, avec les sources touchées |
+| Rejets par source | Entrés, gardés, rejetés, taux, et règles en cause |
+| Exemples | Les 3 titres rejetés les plus récents par règle, avec le détail (motif trouvé, doublon visé) |
+
+Le top 5 est calculé par **couple règle × source**, et non par règle seule. Une règle qui écarte 1 % des articles au total peut écarter 60 % d'une seule source : c'est ce cas qu'il faut voir.
+
+Les **exemples de titres** sont la partie la plus utile. Un compteur ne dit pas si une règle se trompe, un titre le dit. Le premier rapport, le 12/11/2026, a ainsi montré un faux positif de `R04_publi` (voir § 8).
+
+## 8. Journal des ajustements
 
 *À compléter après trois matins de lecture du rapport.*

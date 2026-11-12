@@ -17,8 +17,17 @@ import feedparser
 
 from .reseau import ErreurPermanente
 
-# Champs du payload jamais conserves : ils peuvent contenir le texte integral (droits voisins).
-CHAMPS_EXCLUS = {"content"}
+# Champs du payload jamais conserves (voir docs/donnees.md, « Ce qu'on ne stocke pas ») :
+# - content, summary, summary_detail : peuvent contenir le texte integral (droits voisins) ;
+#   le resume, lui, est garde TRONQUE dans le champ `resume` de l'article ;
+# - auteurs, contributeurs, credits photo : noms de personnes (donnees personnelles) ;
+# - media_* : liens vers les images, dont on n'a pas le droit ni le besoin.
+CHAMPS_EXCLUS = {
+    "content", "summary", "summary_detail",
+    "author", "authors", "author_detail", "contributors", "publisher", "publisher_detail",
+    "credit", "media_credit",
+    "media_content", "media_thumbnail",
+}
 
 
 def lire_flux(contenu: bytes, content_type: Optional[str] = None):

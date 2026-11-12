@@ -12,7 +12,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3307}:3306"   # 3307 cote machine : 3306 est souvent pris par un MySQL local
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 5s
@@ -46,6 +46,7 @@ services:
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
       DATABASE_URL: mysql+pymysql://gazette:gazette@mysql:3306/gazette_db
       GAZETTE_DATA_DIR: /opt/gazette/data
+      GAZETTE_ALERTE_WEBHOOK: ${GAZETTE_ALERTE_WEBHOOK:-}   # optionnel : webhook Slack/Discord/Teams des alertes qualite
     depends_on:
       mysql:
         condition: service_healthy
@@ -54,6 +55,8 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
       - ./collect:/opt/gazette/collect
+      - ./qualite:/opt/gazette/qualite
+      - ./rapports:/opt/gazette/rapports
       - ./sql:/opt/gazette/sql
       - ./sources:/opt/gazette/sources
       - ./data:/opt/gazette/data
@@ -74,6 +77,8 @@ services:
       GAZETTE_DATA_DIR: /app/data
     volumes:
       - ./collect:/app/collect
+      - ./qualite:/app/qualite
+      - ./rapports:/app/rapports
       - ./sql:/app/sql
       - ./sources:/app/sources
       - ./data:/app/data

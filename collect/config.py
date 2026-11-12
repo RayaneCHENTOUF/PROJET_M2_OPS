@@ -20,6 +20,7 @@ class Config:
     dossier_bruts: Path
     fichier_sources: Path
     dossier_migrations: Path
+    dossier_rapports: Path = RACINE / "rapports"   # rapports de qualite du jour (TD 4)
     user_agent: str = USER_AGENT_DEFAUT
     timeout_connexion: float = 5.0   # secondes pour ouvrir la connexion
     timeout_lecture: float = 20.0    # secondes max entre deux paquets recus
@@ -47,6 +48,7 @@ class Config:
             dossier_bruts=data / "articles_bruts",
             fichier_sources=Path(os.getenv("GAZETTE_SOURCES_CSV", RACINE / "sources" / "sources.csv")),
             dossier_migrations=Path(os.getenv("GAZETTE_MIGRATIONS", RACINE / "sql" / "migrations")),
+            dossier_rapports=Path(os.getenv("GAZETTE_RAPPORTS_DIR", RACINE / "rapports")),
             user_agent=os.getenv("GAZETTE_USER_AGENT", USER_AGENT_DEFAUT),
             tentatives=int(os.getenv("GAZETTE_TENTATIVES", "3")),
             backoff_base=float(os.getenv("GAZETTE_BACKOFF_BASE", "2")),
